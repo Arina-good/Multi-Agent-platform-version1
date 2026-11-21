@@ -180,6 +180,16 @@ class UsageMeter:
         return rec
 
     def _persist(self, rec: dict) -> None:
+        # 🌟 核心安全锁：把每次计算的记录持久化写入 Streamlit 全局 session 缓存中，防止重载蒸发！
+        try:
+            import streamlit as st
+            if "meter_records" not in st.session_state:
+                st.session_state["meter_records"] = []
+            if rec not in st.session_state["meter_records"]:
+                st.session_state["meter_records"].append(rec)
+        except Exception:
+            pass
+
         if not self.log_path:
             return
         try:
@@ -189,15 +199,24 @@ class UsageMeter:
             pass
 
     def totals(self) -> dict:
-        prompt = sum(r["prompt"] for r in self.records)
-        completion = sum(r["completion"] for r in self.records)
+        # 🌟 优先从全局持久化 session 缓存中读取记录，避免跨文件实例不一致导致清零
+        try:
+            import streamlit as st
+            records = st.session_state.get("meter_records", self.records)
+        except Exception:
+            records = self.records
+        if not records:
+            records = self.records
+
+        prompt = sum(r["prompt"] for r in records)
+        completion = sum(r["completion"] for r in records)
         cost = sum(r["prompt"] / 1_000_000 * price_of(r["model"])[0]
-                   + r["completion"] / 1_000_000 * price_of(r["model"])[1] for r in self.records)
-        real = any(r["source"] == "api" for r in self.records)
-        return {"calls": len(self.records), "prompt": prompt, "completion": completion,
+                   + r["completion"] / 1_000_000 * price_of(r["model"])[1] for r in records)
+        real = any(r["source"] == "api" for r in records)
+        return {"calls": len(records), "prompt": prompt, "completion": completion,
                 "total": prompt + completion, "cost_cny": round(cost, 6),
                 "cost_usd": round(cost / 7.2, 6), "verified": real,
-                "mixed": real and any(r["source"] == "estimate" for r in self.records)}
+                "mixed": real and any(r["source"] == "estimate" for r in records)}
 
     def by_node(self) -> list[dict]:
         agg: dict[str, dict] = {}
@@ -229,7 +248,12 @@ class UsageMeter:
 
     def reset(self) -> None:
         self.records.clear()
-
+        try:
+            import streamlit as st
+            if "meter_records" in st.session_state:
+                st.session_state["meter_records"].clear()
+        except Exception:
+            pass
 
 # ------------------------------------------------------------------ 单例
 def current() -> UsageMeter:
