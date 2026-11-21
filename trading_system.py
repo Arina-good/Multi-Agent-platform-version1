@@ -64,7 +64,7 @@ def call_doubao_stream(prompt: str, system_prompt: str = "You are a senior finan
             ],
             temperature=0.2,
             max_tokens=220,
-            stream=True
+            stream=True,
             stream_options={"include_usage": True}  # 🌟 只加这一行：命令官方接口在流结束时返回真实 Token 统计！
         )
         return response
