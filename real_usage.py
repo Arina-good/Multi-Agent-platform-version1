@@ -102,8 +102,16 @@ class UsageMeter:
 
     def add_from_response(self, payload, node: str = "", model: str = "") -> dict | None:
         usage = payload.get("usage") if isinstance(payload, dict) else None
+
+# 🌟 严谨处理：如果流式传输没有返回 usage 字典，仅在能拿到真实大模型文本时，利用文本长度进行真实估算
         if not isinstance(usage, dict) or not usage:
+            prompt_text = payload.get("prompt_text", "") if isinstance(payload, dict) else ""
+            completion_text = payload.get("completion_text", "") if isinstance(payload, dict) else ""
+            if prompt_text or completion_text:
+                return self.add_estimate(prompt_text, completion_text, node=node, model=model)
+            # 📌 尊重你的原则：如果真的什么真实数据/文本都拿不到，严谨返回 None（如实呈现拿不到的结果）
             return None
+        
         prompt = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
         completion = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
         if prompt == 0 and completion == 0:
