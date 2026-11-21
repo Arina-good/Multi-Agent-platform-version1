@@ -101,16 +101,64 @@ class UsageMeter:
         self.log_path = Path(log_path) if log_path else None
 
     def add_from_response(self, payload, node: str = "", model: str = "") -> dict | None:
-        usage = payload.get("usage") if isinstance(payload, dict) else None
+        usage = None
+        
+        # 1. 尝试从 dict 或对象中抓取原生的 usage 账单（非流式状态下优先使用真实账单）
+        if isinstance(payload, dict):
+            usage = payload.get("usage")
+        elif hasattr(payload, "usage"):
+            usage = payload.usage
+            if usage and not isinstance(usage, dict):
+                try:
+                    usage = {
+                        "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                        "completion_tokens": getattr(usage, "completion_tokens", 0),
+                        "total_tokens": getattr(usage, "total_tokens", 0)
+                    }
+                except Exception:
+                    usage = None
 
-# 🌟 严谨处理：如果流式传输没有返回 usage 字典，仅在能拿到真实大模型文本时，利用文本长度进行真实估算
-        if not isinstance(usage, dict) or not usage:
-            prompt_text = payload.get("prompt_text", "") if isinstance(payload, dict) else ""
-            completion_text = payload.get("completion_text", "") if isinstance(payload, dict) else ""
-            if prompt_text or completion_text:
-                return self.add_estimate(prompt_text, completion_text, node=node, model=model)
-            # 📌 尊重你的原则：如果真的什么真实数据/文本都拿不到，严谨返回 None（如实呈现拿不到的结果）
-            return None
+        # 2. 如果成功拿到了真实原生 usage，且数据有效，则直接进行物理记录
+        if isinstance(usage, dict) and usage:
+            prompt = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+            completion = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+            if prompt > 0 or completion > 0:
+                rec = {"node": node, "model": model, "prompt": prompt, "completion": completion,
+                       "total": int(usage.get("total_tokens") or prompt + completion),
+                       "source": "api", "ts": time.time()}
+                self.records.append(rec)
+                self._persist(rec)
+                return rec
+
+        # 3. 🌟 核心修复（流式自适应）：如果原生 usage 缺失，智能解析 dict/对象/纯字符串抓取物理文本
+        prompt_text = ""
+        completion_text = ""
+        
+        if isinstance(payload, dict):
+            prompt_text = payload.get("prompt_text", "") or payload.get("prompt", "")
+            completion_text = payload.get("completion_text", "") or payload.get("text", "")
+            if not completion_text and "choices" in payload:
+                try:
+                    completion_text = payload["choices"][0]["message"]["content"]
+                except Exception:
+                    pass
+        elif isinstance(payload, str):
+            completion_text = payload
+        else:
+            # 兼容 SDK 实体对象对象
+            prompt_text = getattr(payload, "prompt_text", "") or getattr(payload, "prompt", "")
+            completion_text = getattr(payload, "completion_text", "") or getattr(payload, "text", "")
+            if not completion_text and hasattr(payload, "choices"):
+                try:
+                    completion_text = payload.choices[0].message.content
+                except Exception:
+                    pass
+
+        # 4. 严谨物理折算：只有真正提取出了分析文本，才根据真实字符长度折算 Token；否则按你的原则严谨返回 None（显示0）
+        if prompt_text or completion_text:
+            return self.add_estimate(prompt_text, completion_text, node=node, model=model)
+            
+        return None
         
         prompt = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
         completion = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
