@@ -14,12 +14,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ==========================================
-# 1. Doubao API Config (Replace with real info)
-# ==========================================
-API_KEY = os.getenv("DOUBAO_API_KEY", "您的豆包ApiKey")
+# 🌟 智能兼容：优先读取 Streamlit 云端后台的 Secrets，若没有则读取本地环境变量
+import streamlit as st
+
+if "DOUBAO_API_KEY" in st.secrets:
+    API_KEY = st.secrets["DOUBAO_API_KEY"]
+else:
+    API_KEY = os.getenv("DOUBAO_API_KEY", "您的豆包ApiKey")
+
 BASE_URL = os.getenv("DOUBAO_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
-ENDPOINT_ID = os.getenv("DOUBAO_ENDPOINT_ID", "您的推理接入点ID")
+
+if "DOUBAO_ENDPOINT_ID" in st.secrets:
+    ENDPOINT_ID = st.secrets["DOUBAO_ENDPOINT_ID"]
+else:
+    ENDPOINT_ID = os.getenv("DOUBAO_ENDPOINT_ID", "您的推理接入点ID")
 
 # 实例化官方极简客户端 (Python 3.13 秒开)
 client = OpenAI(
